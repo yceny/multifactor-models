@@ -1,0 +1,77 @@
+import pandas as pd
+import numpy as np
+from StringIO import StringIO
+from zipfile import ZipFile
+from urllib import urlopen
+import pandas.io.data as web
+from datetime import datetime, timedelta
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+import seaborn as sns
+%pylab inline
+
+url = urlopen("http://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_CSV.zip")
+
+#Download Zipfile and create pandas DataFrame
+zipfile = ZipFile(StringIO(url.read()))
+FFdata = pd.read_csv(zipfile.open('F-F_Research_Data_Factors.CSV'), 
+                     header = 0, names = ['Date','MKT-RF','SMB','HML','RF'], 
+                     skiprows=3)
+
+#Drop last row of data - String
+FFdata = FFdata[:1074]
+
+#Convert YYYYMM into Date
+FFdata['Date'] = pd.to_datetime(FFdata['Date'], format = "%Y%m")
+FFdata.index = FFdata['Date']
+FFdata.drop(FFdata.columns[0], axis=1,inplace=True)
+
+#Drop Days in YYYY-MM-DD
+FFdata.index = FFdata.index.map(lambda x: x.strftime('%Y-%m'))
+
+#Convert into float
+FFdata = FFdata.astype('float')
+FFdata.tail()
+
+#Import Fund Data
+#Tweedy, Browne Global Value Fund - Ticker TBGVX from YahooFinance
+
+#Get Data from Yahoo
+start = datetime.datetime(1950,1,1)
+end = datetime.datetime(2016,1,1)
+f = web.get_data_yahoo("TBGVX", start, end, interval='m')
+
+#Delete Columns
+f.drop(f.columns[[0,1,2,3,4]], axis=1, inplace=True)
+#Fix Date Column
+f.index = f.index.map(lambda x: x.strftime('%Y-%m'))
+#Ln Return
+f['LnReturn'] = np.log(f['Adj Close']) - np.log(f['Adj Close'].shift(1))
+f.head()
+
+#Merge DF
+data2 = pd.concat([f,FFdata], axis = 1)
+
+#Excess Return
+data2['XRtrn'] = (data2['LnReturn']*100 - data2['RF'])
+#Align Data
+df = data2[np.isfinite(data2['XRtrn'])]
+
+df.tail()
+
+#df = data2[np.isfinite(data2['XRtrn'])]
+
+y = df['XRtrn']
+X = df.ix[:,[2,3,4]]
+X = sm.add_constant(X)
+
+
+model = sm.OLS(y, X)
+results = model.fit()
+print(results.summary())
+
+fig = plt.figure(figsize=(12,8))
+fig = sm.graphics.plot_partregress_grid(results, fig = fig)
+plt.show()
+
+#sns.lmplot(x="MKT-RF", y="XRtrn", data=data2)
